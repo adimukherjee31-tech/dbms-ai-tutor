@@ -1,9 +1,11 @@
 streamlit
-google-generativeai
+google-generativeai>=0.8.3
 langchain
 langchain-community
 langchain-text-splitters
 langchain-huggingface
+langchain-google-genai
 pypdf
+pymupdf
 faiss-cpu
 sentence-transformers
