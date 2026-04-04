@@ -1,10 +1,9 @@
-langchain
-langchain-text-splitters
 streamlit
 google-generativeai
-langchain-google-genai
+langchain
 langchain-community
+langchain-text-splitters
+langchain-huggingface
 pypdf
 faiss-cpu
 sentence-transformers
-langchain-huggingface
