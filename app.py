@@ -1,10 +1,11 @@
 import streamlit as st
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_community
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 import tempfile
+import os
 
 # 1. UI Setup
 st.set_page_config(page_title="AI Tutor", layout="wide")
