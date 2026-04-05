@@ -1,133 +1,115 @@
 import streamlit as st
+import os
+import tempfile
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-import tempfile
-import os
+from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
-# --- PAGE SETUP ---
+# --- PAGE CONFIG ---
 st.set_page_config(page_title="DBMS AI Tutor", layout="wide")
 st.title("🎓 JNTUH DBMS AI Tutor")
-st.caption("Using LangChain + Gemini Stable for Exam Prep")
+st.info("Study Mode: RAG (Retrieval Augmented Generation) enabled.")
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("1. Setup")
+    st.header("1. Configuration")
     api_key = st.text_input("Enter Gemini API Key", type="password")
-    uploaded_file = st.file_uploader("Upload DBMS Textbook (PDF)", type="pdf")
+    uploaded_file = st.file_uploader("Upload PDF Textbook", type="pdf")
     
-    st.header("2. Study Settings")
-    page_limit = st.slider("Number of pages to analyze", 10, 1000, 250)
-    
-    st.header("3. Teaching Style")
-    tone = st.selectbox("Choose Teaching Style", 
-                        ["JNTUH Professor (Standard)", 
-                         "Munnabhai Style (Hinglish)", 
-                         "Class 8 Level (Simple)"])
+    st.header("2. Settings")
+    # Using 1.5-flash as default, adding 1.0-pro as backup
+    model_choice = st.selectbox("Select AI Model", ["gemini-1.5-flash", "gemini-1.0-pro"])
+    tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Simple"])
+    page_limit = st.slider("Pages to index", 10, 500, 200)
 
-# --- DATA PROCESSING ---
+# --- CORE FUNCTIONS ---
 def clean_text(text):
     return text.replace('\x00', '').encode('utf-8', 'ignore').decode('utf-8')
 
+# --- PROCESSING LOGIC ---
 if api_key and uploaded_file:
     try:
-        # Initialize the LLM via LangChain (More stable than raw genai calls)
-        # We try 1.5-flash, but LangChain handles the API versioning logic
+        # Initialize LLM
         llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash", 
+            model=model_choice,
             google_api_key=api_key,
-            temperature=0.7
+            temperature=0.3
         )
 
         @st.cache_resource(show_spinner=False)
-        def process_pdf(file, limit):
+        def get_vector_db(file, limit):
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(file.read())
                 tmp_path = tmp.name
             
             loader = PyMuPDFLoader(tmp_path)
-            all_pages = loader.load()
-            pages = all_pages[:limit]
+            docs = loader.load()[:limit]
             
-            for page in pages:
-                page.page_content = clean_text(page.page_content)
+            # Clean and Split
+            for d in docs:
+                d.page_content = clean_text(d.page_content)
                 
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
-            chunks = splitter.split_documents(pages)
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+            chunks = splitter.split_documents(docs)
             
+            # Embeddings
             embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             db = FAISS.from_documents(chunks, embeddings)
             os.remove(tmp_path)
             return db
 
-        with st.spinner("Turbo-reading your textbook..."):
-            vector_db = process_pdf(uploaded_file, page_limit)
-        
-        st.success("Tutor is online! Ready for your DBMS questions.")
+        with st.spinner("Processing textbook..."):
+            vector_db = get_vector_db(uploaded_file, page_limit)
 
-        # --- CHAT INTERFACE ---
-        user_query = st.chat_input("Ask about SQL, Normalization, Transactions...")
+        # --- CHAT UI ---
+        query = st.chat_input("Ask a DBMS question...")
         
-        if user_query:
+        if query:
             with st.chat_message("user"):
-                st.write(user_query)
-            
-            # 1. Search for context
-            docs = vector_db.similarity_search(user_query, k=4)
-            context_text = "\n\n".join([doc.page_content for doc in docs])
-            
-            # 2. Set Personality
-            if tone == "Munnabhai Style (Hinglish)":
-                personality = "Answer like Munnabhai. Use tapori Hinglish, call the student 'Mammu'. Explain correctly but use funny street analogies."
-            elif tone == "Class 8 Level (Simple)":
-                personality = "Explain like I am a 13-year-old child using toys or school examples."
-            else:
-                personality = "Answer as a professional JNTUH Professor. Provide a structured answer with points suitable for an exam."
+                st.write(query)
 
-            # 3. Create Prompt
-            template = """
-            System Instructions: {personality}
+            # 1. Search Vector DB
+            context_docs = vector_db.similarity_search(query, k=3)
+            context_text = "\n\n".join([d.page_content for d in context_docs])
+
+            # 2. Define Personality
+            styles = {
+                "Professor": "Professional JNTUH Professor. Use bullet points, clear headings, and exam-oriented language.",
+                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call the user 'Mammu', use tapori analogies but keep technical facts 100% correct.",
+                "Simple": "Explain like I'm 10 years old. Use simple everyday analogies."
+            }
+
+            # 3. Modern LangChain Chain (LCEL)
+            prompt = ChatPromptTemplate.from_template("""
+            Role: {personality}
             
             Context from Textbook:
             {context}
             
             Question: {question}
             
-            Helpful Answer:"""
-            
-            prompt = PromptTemplate(
-                template=template, 
-                input_variables=["personality", "context", "question"]
-            )
-            
-            # 4. Generate Response
+            Instructions: If the answer is in the context, use it. If not, use your general DBMS knowledge to help the student prepare for their computer science exam.
+            """)
+
+            chain = prompt | llm | StrOutputParser()
+
             with st.chat_message("assistant"):
                 try:
-                    chain = prompt | llm
                     response = chain.invoke({
-                        "personality": personality,
+                        "personality": styles[tone],
                         "context": context_text,
-                        "question": user_query
+                        "question": query
                     })
-                    st.markdown(response.content)
-                except Exception as api_err:
-                    st.error(f"Model Error: {api_err}")
-                    st.info("Attempting fallback to Gemini 1.0 Pro...")
-                    # Fallback to older model if Flash is restricted
-                    fallback_llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=api_key)
-                    chain = prompt | fallback_llm
-                    response = chain.invoke({
-                        "personality": personality,
-                        "context": context_text,
-                        "question": user_query
-                    })
-                    st.markdown(response.content)
+                    st.markdown(response)
+                except Exception as e:
+                    st.error(f"AI Error: {e}")
+                    st.info("Note: If you get a 404, try switching the 'Model' in the sidebar to gemini-1.0-pro.")
 
-    except Exception as e:
-        st.error(f"General System Error: {e}")
+    except Exception as general_err:
+        st.error(f"System Error: {general_err}")
 else:
-    st.info("Welcome! Please provide your API Key and PDF to start studying.")
+    st.warning("Please enter your API Key and upload a PDF in the sidebar.")
