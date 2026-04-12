@@ -11,8 +11,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="DBMS AI Tutor", layout="wide")
-st.title("🎓 JNTUH DBMS AI Tutor")
+st.set_page_config(page_title="Socrates Pedagogical Bridge AI App for EEE and ECE", layout="wide")
+st.title("🎓 Socrates Pedagogical Bridge AI App for EEE and ECE")
 
 # --- SIDEBAR ---
 with st.sidebar:
