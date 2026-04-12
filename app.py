@@ -74,7 +74,7 @@ if api_key and uploaded_file:
             vector_db = get_vector_db(uploaded_file, page_limit)
 
         # --- CHAT ---
-        query = st.chat_input("Ask a DBMS question...")
+        query = st.chat_input("Ask a question related to CSE/AI/ML ...")
         
         if query:
             with st.chat_message("user"):
