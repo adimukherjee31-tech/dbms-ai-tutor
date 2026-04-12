@@ -42,7 +42,7 @@ if api_key and uploaded_file:
         
         # FIX: We try the most stable model name string
         # If 'gemini-1.5-flash' fails, we will catch it below
-        model_name = 'gemini-1.5-flash'
+        model_name = 'gemini-1.5-flash-latest'
         model = genai.GenerativeModel(model_name=model_name)
         
         @st.cache_resource(show_spinner=False)
