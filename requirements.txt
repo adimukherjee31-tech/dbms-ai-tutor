@@ -2,6 +2,7 @@ streamlit
 pymupdf
 langchain
 langchain-community
+langchain-text-splitters
 langchain-google-genai
 google-generativeai
 faiss-cpu
