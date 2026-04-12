@@ -11,7 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Socrates: Pedagogical AI Tutor", layout="wide")
+st.set_page_config(page_title="Socrates AI Tutor", layout="wide")
 st.title("🎓 Socrates: Pedagogical AI Tutor")
 
 # --- SIDEBAR ---
@@ -29,10 +29,8 @@ def get_working_model(api_key):
     try:
         genai.configure(api_key=api_key)
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # Clean the names (remove 'models/')
         clean_models = [m.replace('models/', '') for m in models]
         
-        # Priority list
         for preferred in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']:
             if preferred in clean_models:
                 return preferred
@@ -43,7 +41,6 @@ def get_working_model(api_key):
 # --- PROCESSING ---
 if api_key and uploaded_file:
     try:
-        # Detect model
         active_model = get_working_model(api_key)
         st.sidebar.success(f"Connected to: {active_model}")
 
@@ -70,7 +67,7 @@ if api_key and uploaded_file:
             os.remove(tmp_path)
             return db
 
-        with st.spinner("Analyzing your technical materials..."):
+        with st.spinner("Analyzing your materials..."):
             vector_db = get_vector_db(uploaded_file, page_limit)
 
         # --- CHAT ---
@@ -85,13 +82,21 @@ if api_key and uploaded_file:
 
             styles = {
                 "Professor": "Professional Academic Tutor. Use bullet points and exam-style headings.",
-                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call the user 'Mammu', use funny analogies related to daily life.",
-                "Simple": "Explain like I'm 10 years old with very simple examples."
+                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call user 'Mammu', use funny life analogies.",
+                "Simple": "Explain like I'm 10 years old with simple examples."
             }
 
+            # GROUNDED PROMPT LOGIC
             prompt = ChatPromptTemplate.from_template("""
+            You are Socrates, a pedagogical tutor. Use the provided Context to answer the Question.
+            
+            GROUNDING RULES:
+            1. Search the 'Context' for the answer first. 
+            2. If the answer is found in the Context, explain it and MUST append: "[SOURCE: TEXTBOOK]" at the end.
+            3. If the answer is NOT found in the Context, answer using your general knowledge but you MUST start the response with: "[SOURCE: GENERAL AI KNOWLEDGE - NOT IN PDF]".
+            
             Context: {context}
-            Style: {personality}
+            Style/Personality: {personality}
             Question: {question}
             
             Answer:""")
@@ -108,7 +113,6 @@ if api_key and uploaded_file:
                     st.markdown(response)
                 except Exception as e:
                     st.error(f"AI Connection Error: {e}")
-                    st.info("Please verify your API key at Google AI Studio.")
 
     except Exception as general_err:
         st.error(f"System Error: {general_err}")
