@@ -14,7 +14,7 @@ st.set_page_config(page_title="Socrates AI", layout="wide")
 # 1. EDIT YOUR TITLES HERE
 # ==========================================================
 st.title("🎓 Socrates: The Pedagogical AI Tutor") 
-st.markdown("### Grounded Learning for CSE/AI/ML Students")
+st.markdown("### Grounded Learning Bridge App for EEE and ECE students getting skill ready for. cse ,ai,ml")
 # ==========================================================
 
 # --- SIDEBAR ---
