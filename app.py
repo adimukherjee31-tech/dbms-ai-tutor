@@ -10,7 +10,7 @@ import os
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Socrates AI Tutor", layout="wide")
 st.title("🎓 Socrates: The Pedagogical AI Tutor")
-st.markdown("### Specialized for JNTUH Engineering Students (CSE/AI/ML)")
+st.markdown("### Specialized for EEE and ECE Engineering Students getting skill ready for (CSE/AI/ML)")
 
 # --- SIDEBAR: Configuration & Speed ---
 with st.sidebar:
