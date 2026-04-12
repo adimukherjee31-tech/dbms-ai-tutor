@@ -1,95 +1,116 @@
 import streamlit as st
-import fitz  # PyMuPDF
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains.question_answering import load_qa_chain
-from langchain.prompts import PromptTemplate
+import tempfile
 import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Socrates AI Tutor", layout="wide")
+st.set_page_config(page_title="Socrates: Pedagogical AI Tutor", layout="wide")
+st.title("🎓 Socrates: Pedagogical AI Tutor")
 
-# This is the FIX: 'gemini-1.5-pro' avoids the 404 error currently seen with 'flash'
-STABLE_MODEL = "gemini-1.5-pro"
-
-def get_pdf_text(pdf_docs):
-    """Fast extraction for technical CS textbooks."""
-    text = ""
-    for pdf in pdf_docs:
-        doc = fitz.open(stream=pdf.read(), filetype="pdf")
-        for page in doc:
-            text += page.get_text()
-    return text
-
-def get_text_chunks(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    return text_splitter.split_text(text)
-
-def get_vector_store(text_chunks):
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
-
-def get_conversational_chain():
-    prompt_template = """
-    You are Socrates, a pedagogical tutor helping EEE/ECE students bridge into CSE, AI, and ML.
+# --- SIDEBAR ---
+with st.sidebar:
+    st.header("1. Setup")
+    api_key = st.text_input("Enter Gemini API Key", type="password")
+    uploaded_file = st.file_uploader("Upload Textbook/Notes (PDF)", type="pdf")
     
-    RULES:
-    1. If information is in Context, answer and end with: "[SOURCE: TEXTBOOK]"
-    2. If NOT in Context, use your internal knowledge but start with: "[SOURCE: GENERAL AI KNOWLEDGE]"
-    3. Use hardware/circuit analogies to explain software concepts.
+    st.header("2. Study Settings")
+    tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Simple"])
+    page_limit = st.slider("Pages to index", 10, 500, 200)
 
-    Context:\n {context}?\n
-    Question: \n{question}\n
-
-    Answer:
-    """
-    model = ChatGoogleGenerativeAI(model=STABLE_MODEL, temperature=0.3)
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    return load_qa_chain(model, chain_type="stuff", prompt=prompt)
-
-def user_input(user_question, api_key):
+# --- AUTO-DETECT MODELS ---
+def get_working_model(api_key):
     try:
         genai.configure(api_key=api_key)
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # Clean the names (remove 'models/')
+        clean_models = [m.replace('models/', '') for m in models]
         
-        # Load index with safety flag
-        new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
-        docs = new_db.similarity_search(user_question)
-        
-        chain = get_conversational_chain()
-        response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
-        
-        st.write("Socrates:", response["output_text"])
-    except Exception as e:
-        st.error(f"Error: {e}")
+        # Priority list
+        for preferred in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']:
+            if preferred in clean_models:
+                return preferred
+        return clean_models[0] if clean_models else None
+    except Exception:
+        return "gemini-1.5-flash" # Fallback
 
-def main():
-    st.title("🎓 Socrates: Pedagogical Exam Tutor")
-    
-    with st.sidebar:
-        st.header("Setup Center")
-        api_key = st.text_input("Enter Gemini API Key:", type="password")
-        pdf_docs = st.file_uploader("Upload Exam Materials (PDF)", accept_multiple_files=True)
+# --- PROCESSING ---
+if api_key and uploaded_file:
+    try:
+        # Detect model
+        active_model = get_working_model(api_key)
+        st.sidebar.success(f"Connected to: {active_model}")
+
+        llm = ChatGoogleGenerativeAI(
+            model=active_model,
+            google_api_key=api_key,
+            temperature=0.3
+        )
+
+        @st.cache_resource(show_spinner=False)
+        def get_vector_db(file, limit):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(file.read())
+                tmp_path = tmp.name
+            
+            loader = PyMuPDFLoader(tmp_path)
+            docs = loader.load()[:limit]
+            
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+            chunks = splitter.split_documents(docs)
+            
+            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            db = FAISS.from_documents(chunks, embeddings)
+            os.remove(tmp_path)
+            return db
+
+        with st.spinner("Analyzing your technical materials..."):
+            vector_db = get_vector_db(uploaded_file, page_limit)
+
+        # --- CHAT ---
+        query = st.chat_input("Ask a question from the book...")
         
-        if st.button("Process & Study"):
-            if api_key and pdf_docs:
-                with st.spinner("Analyzing books..."):
-                    raw_text = get_pdf_text(pdf_docs)
-                    get_vector_store(get_text_chunks(raw_text))
-                    st.success("Analysis Complete!")
-            else:
-                st.error("API Key and PDF required.")
+        if query:
+            with st.chat_message("user"):
+                st.write(query)
 
-    user_question = st.chat_input("Ask about DBMS, Research, or AI...")
-    if user_question:
-        if api_key:
-            user_input(user_question, api_key)
-        else:
-            st.error("Enter API Key in sidebar.")
+            context_docs = vector_db.similarity_search(query, k=4)
+            context_text = "\n\n".join([d.page_content for d in context_docs])
 
-if __name__ == "__main__":
-    main()
+            styles = {
+                "Professor": "Professional Academic Tutor. Use bullet points and exam-style headings.",
+                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call the user 'Mammu', use funny analogies related to daily life.",
+                "Simple": "Explain like I'm 10 years old with very simple examples."
+            }
+
+            prompt = ChatPromptTemplate.from_template("""
+            Context: {context}
+            Style: {personality}
+            Question: {question}
+            
+            Answer:""")
+
+            chain = prompt | llm | StrOutputParser()
+
+            with st.chat_message("assistant"):
+                try:
+                    response = chain.invoke({
+                        "personality": styles[tone],
+                        "context": context_text,
+                        "question": query
+                    })
+                    st.markdown(response)
+                except Exception as e:
+                    st.error(f"AI Connection Error: {e}")
+                    st.info("Please verify your API key at Google AI Studio.")
+
+    except Exception as general_err:
+        st.error(f"System Error: {general_err}")
+else:
+    st.warning("Enter API Key and upload PDF to start.")
