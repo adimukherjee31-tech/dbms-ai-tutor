@@ -9,3 +9,7 @@ pypdf
 pymupdf
 faiss-cpu
 sentence-transformers
+google-generativeai
+streamlit
+# ... other dependencies ...
+
