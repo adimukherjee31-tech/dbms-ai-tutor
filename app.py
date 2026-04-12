@@ -89,12 +89,23 @@ if api_key and uploaded_file:
                 "Simple": "Explain like I'm 10 years old."
             }
 
-            prompt = ChatPromptTemplate.from_template("""
-            Context: {context}
-            Style: {personality}
-            Question: {question}
+            # --- CHANGE FROM SOFT TO STRICT PROMPT ---
+prompt = f"""
+You are 'Socrates', a strict academic tutor. 
+
+STRICT RULE: You must answer the question using ONLY the 'TEXTBOOK CONTEXT' provided below. 
+1. If the information is not present in the context, explicitly say: "This specific detail is not mentioned in the provided textbook, but based on general engineering principles..."
+2. Do not use your own internal knowledge to fill in gaps unless you clearly label it as 'General Knowledge'.
+3. Your primary priority is to keep the student focused on the syllabus book.
+
+TEXTBOOK CONTEXT:
+{context}
+
+STUDENT QUESTION:
+{user_question}
+"""
+
             
-            Answer:""")
 
             chain = prompt | llm | StrOutputParser()
 
