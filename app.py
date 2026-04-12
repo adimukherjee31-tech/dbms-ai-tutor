@@ -12,11 +12,11 @@ import google.generativeai as genai
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Socrates AI Tutor", layout="wide")
 
-# FIX: Using 'gemini-1.5-pro' is the most stable and avoids the 404 error
-MODEL_NAME = "gemini-1.5-pro" 
+# This is the FIX: 'gemini-1.5-pro' avoids the 404 error currently seen with 'flash'
+STABLE_MODEL = "gemini-1.5-pro"
 
 def get_pdf_text(pdf_docs):
-    """High-performance extraction for technical textbooks."""
+    """Fast extraction for technical CS textbooks."""
     text = ""
     for pdf in pdf_docs:
         doc = fitz.open(stream=pdf.read(), filetype="pdf")
@@ -25,86 +25,71 @@ def get_pdf_text(pdf_docs):
     return text
 
 def get_text_chunks(text):
-    """Chunks text so the AI can handle 500+ page books."""
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_text(text)
-    return chunks
+    return text_splitter.split_text(text)
 
 def get_vector_store(text_chunks):
-    """Saves a local search index using HuggingFace."""
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
 
 def get_conversational_chain():
-    """Socratic pedagogical prompt logic."""
     prompt_template = """
     You are Socrates, a pedagogical tutor helping EEE/ECE students bridge into CSE, AI, and ML.
     
     RULES:
-    1. If the answer is in the Context, provide it and end with "[SOURCE: TEXTBOOK]".
-    2. If the answer is NOT in the Context, explain from your knowledge and start with "[SOURCE: GENERAL AI KNOWLEDGE]".
-    3. Use analogies to circuits, hardware, or logic gates to help the student understand.
+    1. If information is in Context, answer and end with: "[SOURCE: TEXTBOOK]"
+    2. If NOT in Context, use your internal knowledge but start with: "[SOURCE: GENERAL AI KNOWLEDGE]"
+    3. Use hardware/circuit analogies to explain software concepts.
 
     Context:\n {context}?\n
     Question: \n{question}\n
 
-    Socratic Answer:
+    Answer:
     """
-    # Using the stable 'pro' model to ensure connection
-    model = ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=0.3)
+    model = ChatGoogleGenerativeAI(model=STABLE_MODEL, temperature=0.3)
     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
-    return chain
+    return load_qa_chain(model, chain_type="stuff", prompt=prompt)
 
 def user_input(user_question, api_key):
-    """Processes questions and handles the Gemini connection."""
     try:
         genai.configure(api_key=api_key)
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         
-        if not os.path.exists("faiss_index"):
-            st.error("Please upload and 'Process' your PDFs first.")
-            return
-
-        # Load the index with safety flag enabled
+        # Load index with safety flag
         new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
         docs = new_db.similarity_search(user_question)
         
         chain = get_conversational_chain()
         response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
         
-        st.markdown(f"### Socrates says:\n{response['output_text']}")
+        st.write("Socrates:", response["output_text"])
     except Exception as e:
-        st.error(f"AI Connection Error: {e}")
-        st.info("TIP: If you see a 404, please ensure your API key has 'Gemini 1.5 Pro' enabled in Google AI Studio.")
+        st.error(f"Error: {e}")
 
 def main():
-    st.title("🎓 Socrates: EEE/ECE to CSE Bridge")
-    st.write("Ready for your **DBMS, AI, and Research Aptitude** exams.")
-
+    st.title("🎓 Socrates: Pedagogical Exam Tutor")
+    
     with st.sidebar:
-        st.header("Setup")
-        api_key = st.text_input("Enter Google API Key:", type="password")
-        pdf_docs = st.file_uploader("Upload Exam PDFs", accept_multiple_files=True)
+        st.header("Setup Center")
+        api_key = st.text_input("Enter Gemini API Key:", type="password")
+        pdf_docs = st.file_uploader("Upload Exam Materials (PDF)", accept_multiple_files=True)
         
-        if st.button("Process & Analyze"):
+        if st.button("Process & Study"):
             if api_key and pdf_docs:
-                with st.spinner("Socrates is reading..."):
+                with st.spinner("Analyzing books..."):
                     raw_text = get_pdf_text(pdf_docs)
-                    text_chunks = get_text_chunks(raw_text)
-                    get_vector_store(text_chunks)
-                    st.success("Ready for your questions!")
+                    get_vector_store(get_text_chunks(raw_text))
+                    st.success("Analysis Complete!")
             else:
-                st.warning("Please provide both an API key and PDF files.")
+                st.error("API Key and PDF required.")
 
-    user_question = st.chat_input("Ask Socrates a question...")
-
+    user_question = st.chat_input("Ask about DBMS, Research, or AI...")
     if user_question:
         if api_key:
             user_input(user_question, api_key)
         else:
-            st.error("Missing API Key in sidebar.")
+            st.error("Enter API Key in sidebar.")
 
 if __name__ == "__main__":
     main()
