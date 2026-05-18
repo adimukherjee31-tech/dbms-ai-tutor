@@ -13,29 +13,38 @@ from langchain_core.embeddings import Embeddings
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Socrates AI Tutor", layout="wide", page_icon="🎓")
 
-# CSS HACK: Force colorful emojis and hide standard black dots
+# CSS: Force colorful emojis and remove black bullets
 st.markdown("""
     <style>
-    /* Force Emojis to be colorful and hide default dots */
-    ul, li { list-style-type: none !important; }
+    ul, li { list-style-type: none !important; padding-left: 0 !important; }
     .stMarkdown p, .stMarkdown li { 
-        font-family: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", sans-serif !important;
-        font-size: 1.1rem !important;
+        font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif !important;
+        font-size: 1.15rem !important;
+        line-height: 1.7 !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🎓 Socrates: Pedagogical AI Tutor")
 
-# --- CUSTOM EMBEDDINGS CLASS (Fixes the 404 Error) ---
-class SimpleGoogleEmbeddings(Embeddings):
+# --- CUSTOM ROBUST EMBEDDINGS (THE FIX) ---
+class StableGoogleEmbeddings(Embeddings):
     def __init__(self, api_key):
-        genai.configure(api_key=api_key)
+        # Force the use of 'v1' stable API instead of 'v1beta'
+        genai.configure(api_key=api_key, transport='rest')
+        self.model = "models/text-embedding-004"
+        
+        # Verify if 004 exists for this key, otherwise fallback to 001
+        try:
+            genai.get_model(self.model)
+        except:
+            self.model = "models/embedding-001"
+
     def embed_documents(self, texts):
-        # Uses the most stable embedding method directly
-        return [genai.embed_content(model="models/embedding-001", content=t, task_type="retrieval_document")["embedding"] for t in texts]
+        return [genai.embed_content(model=self.model, content=t, task_type="retrieval_document")["embedding"] for t in texts]
+
     def embed_query(self, text):
-        return genai.embed_content(model="models/embedding-001", content=text, task_type="retrieval_query")["embedding"]
+        return genai.embed_content(model=self.model, content=text, task_type="retrieval_query")["embedding"]
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -51,22 +60,27 @@ with st.sidebar:
         "Simple"
     ])
     
-    st.info("🌈 **Aesthetic Mode**: Vibrant Stickers Enabled.")
+    st.info("🎨 **Pinterest Stickers**: Active & Colorful.")
     page_range = st.slider("Select Page Range", 1, 2500, (1, 100))
     start_page, end_page = page_range
 
 # --- PROCESSING ---
 if api_key and uploaded_file:
     try:
+        # Initialize direct Google SDK
         genai.configure(api_key=api_key)
-        # Use Gemini 1.5 Flash for Chat
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.7)
-        st.sidebar.success("Connected to Gemini 1.5 Flash")
+        
+        # Initialize Chat Model (Gemini 1.5 Flash is best for this)
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash", 
+            google_api_key=api_key, 
+            temperature=0.7
+        )
 
         @st.cache_resource(show_spinner=False)
         def get_vector_db(file_content, start_pg, end_pg, _api_key):
-            # Custom Direct Embedding Call
-            embeddings = SimpleGoogleEmbeddings(_api_key)
+            # USE OUR NEW STABLE EMBEDDING CLASS
+            embeddings = StableGoogleEmbeddings(_api_key)
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(file_content)
@@ -78,42 +92,46 @@ if api_key and uploaded_file:
             
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = splitter.split_documents(docs)
+            
+            # Create FAISS DB
             db = FAISS.from_documents(chunks, embeddings)
             os.remove(tmp_path)
             return db
 
-        with st.spinner(f"🚀 Indexing pages {start_page} to {end_page}..."):
+        with st.spinner(f"🚀 Speed-indexing pages {start_page} to {end_page}..."):
             vector_db = get_vector_db(uploaded_file.getvalue(), start_page, end_page, api_key)
+            st.sidebar.success(f"✅ Ready! Using {StableGoogleEmbeddings(api_key).model}")
 
         # --- CHAT ---
-        query = st.chat_input("Ask anything from this section...")
+        query = st.chat_input("Ask a question from this section...")
         
         if query:
             with st.chat_message("user"): st.write(query)
 
+            # Retrieve context
             context_docs = vector_db.similarity_search(query, k=5)
             context_text = "\n\n".join([d.page_content for d in context_docs])
 
             styles = {
-                "Professor": "Academic Tutor. Professional yet aesthetic.",
-                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish and 'Mammu'.",
+                "Professor": "Academic Tutor. Professional headers, clear points.",
+                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish and call user 'Mammu'.",
                 "Physicswallah UGC-NET Coach": "High-energy coach. 'Hello Baccho!', 'Selection rukna nahi chahiye!'.",
-                "Simple": "Explain like I'm 10 with colorful examples."
+                "Simple": "Explain like I'm 10 with very colorful examples."
             }
 
             prompt = ChatPromptTemplate.from_template("""
             You are Socrates, a pedagogical tutor. 
             
             GROUNDING:
-            - If found in Context: Explain and end with "[SOURCE: TEXTBOOK]"
-            - If not: Use general knowledge and start with "[SOURCE: GENERAL AI KNOWLEDGE]"
+            - If found in Context: Explain it. End with "[SOURCE: TEXTBOOK]"
+            - If not: Use General Knowledge. Start with "[SOURCE: GENERAL AI KNOWLEDGE]"
 
-            PINTEREST STICKER RULES (CRITICAL):
-            - NEVER use black dots, dashes, or asterisks (•, -, *) for lists.
-            - Start EVERY new point with a unique, BRIGHT, COLORFUL emoji sticker.
-            - Use ONLY vivid emojis: 🌈, 🍭, 🎀, ✨, 🎨, 🌟, 🍬, 🦋, 🦄, 🎈, 🧁, 🌸, 🎡, 🍓, 🍦.
-            - Use "╰┈➤ 💖" for sub-points.
-            - The entire output should look like a VIBRANT digital scrapbook.
+            AESTHETIC & COLOR RULES (STRICT):
+            - NEVER use black/gray dots, dashes, or stars (•, -, *, 🔘).
+            - YOU MUST start EVERY new point with a DIFFERENT bright, colorful Pinterest emoji.
+            - USE THESE ONLY: 🌈, 🍭, 🎀, ✨, 🎨, 🌟, 🍬, 🦋, 🦄, 🎈, 🧁, 🌸, 🎡, 🍓, 🍦, 🍭, 🎠.
+            - SUB-POINTS: Use "╰┈➤ 💖" followed by a different colorful emoji.
+            - Ensure the answer looks like high-vibrancy, aesthetic study notes.
             
             Context: {context}
             Style: {personality}
