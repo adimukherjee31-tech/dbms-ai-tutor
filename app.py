@@ -21,7 +21,6 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload Textbook/Notes (PDF)", type="pdf")
     
     st.header("2. Study Settings")
-    # Added "Physicswallah UGC-NET Coach" to the options below
     tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Physicswallah UGC-NET Coach", "Simple"])
     page_limit = st.slider("Pages to index", 10, 500, 200)
 
@@ -81,11 +80,10 @@ if api_key and uploaded_file:
             context_docs = vector_db.similarity_search(query, k=4)
             context_text = "\n\n".join([d.page_content for d in context_docs])
 
-            # Added the new style description to the dictionary below
             styles = {
                 "Professor": "Professional Academic Tutor. Use bullet points and exam-style headings.",
                 "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call user 'Mammu', use funny life analogies.",
-                "Physicswallah UGC-NET Coach": "High-energy, motivational coaching style. Use 'Hello Baccho!', 'Ekdum basic se samjhenge', and 'Selection rukna nahi chahiye'. Use Hinglish, focus on key points for UGC-NET exams, and be very encouraging.",
+                "Physicswallah UGC-NET Coach": "High-energy, motivational coaching style. Use 'Hello Baccho!', 'Ekdum basic se samjhenge', and 'Selection rukna nahi chahiye'. Use Hinglish and focus on key exam points.",
                 "Simple": "Explain like I'm 10 years old with simple examples."
             }
 
@@ -97,6 +95,7 @@ if api_key and uploaded_file:
             1. Search the 'Context' for the answer first. 
             2. If the answer is found in the Context, explain it and MUST append: "[SOURCE: TEXTBOOK]" at the end.
             3. If the answer is NOT found in the Context, answer using your general knowledge but you MUST start the response with: "[SOURCE: GENERAL AI KNOWLEDGE - NOT IN PDF]".
+            4. STICKERS: For every point or list item, DO NOT use plain black dots. Instead, use bright, colorful Pinterest-style stickers/emojis (like ✨, 🌈, 💡, 🎨, 🚀, 🌸, 🍭, 🎀, 🌟) to make the notes look aesthetic and vibrant.
             
             Context: {context}
             Style/Personality: {personality}
