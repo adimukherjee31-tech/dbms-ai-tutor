@@ -3,97 +3,71 @@ import os
 import tempfile
 import time
 import google.generativeai as genai
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.embeddings import Embeddings
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Socrates AI Tutor", layout="wide", page_icon="🎓")
 
-# --- CSS NUCLEAR OPTION: REMOVE BLACK DOTS & FORCE COLOR ---
+# CSS: FORCE COLORFUL EMOJIS & HIDE BLACK BULLETS
 st.markdown("""
     <style>
     li::marker { content: none !important; }
     ul { list-style-type: none !important; padding-left: 0 !important; }
-    li { list-style-type: none !important; padding-left: 0 !important; margin-bottom: 15px !important; }
+    li { list-style-type: none !important; padding-left: 0 !important; margin-bottom: 12px !important; }
     .stMarkdown p, .stMarkdown li { 
-        font-size: 1.15rem !important;
-        line-height: 1.7 !important;
         font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif !important;
+        font-size: 1.1rem !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🎓 Socrates: Pedagogical AI Tutor")
 
-# --- THE QUOTA-SAVER: BATCH EMBEDDING CLASS ---
-class QuotaSafeEmbeddings(Embeddings):
+# --- NO-DEPENDENCY EMBEDDING CLASS ---
+# This class talks DIRECTLY to Google, bypassing the broken LangChain code.
+class PureGoogleEmbeddings:
     def __init__(self, api_key):
         genai.configure(api_key=api_key)
-        # Identify available model
-        all_models = [m.name for m in genai.list_models() if 'embedContent' in m.supported_generation_methods]
-        self.model_name = 'models/text-embedding-004' if 'models/text-embedding-004' in all_models else 'models/embedding-001'
+        self.model = "models/text-embedding-004"
 
     def embed_documents(self, texts):
-        """Sends texts in batches of 100 to avoid Quota 429 errors."""
-        all_embeddings = []
-        # Google allows up to 100 texts per batch request
-        for i in range(0, len(texts), 90):
-            batch = texts[i : i + 90]
-            try:
-                result = genai.embed_content(
-                    model=self.model_name,
-                    content=batch,
-                    task_type="retrieval_document"
-                )
-                all_embeddings.extend(result["embedding"])
-                # Short pause to be extra safe with the free tier rate limit
-                time.sleep(1) 
-            except Exception as e:
-                st.error(f"Batch Error: {e}")
-                time.sleep(5) # Wait longer if we hit a snag
-        return all_embeddings
+        # We send 50 texts at a time to stay under the free tier limit
+        embeddings = []
+        for i in range(0, len(texts), 50):
+            batch = texts[i : i + 50]
+            # Official SDK call (Safe from 404 v1beta errors)
+            response = genai.embed_content(model=self.model, content=batch, task_type="retrieval_document")
+            embeddings.extend(response['embedding'])
+            time.sleep(0.5) 
+        return embeddings
 
     def embed_query(self, text):
-        result = genai.embed_content(
-            model=self.model_name,
-            content=text,
-            task_type="retrieval_query"
-        )
-        return result["embedding"]
+        response = genai.embed_content(model=self.model, content=text, task_type="retrieval_query")
+        return response['embedding']
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("1. Setup")
     api_key = st.text_input("Enter Gemini API Key", type="password")
-    uploaded_file = st.file_uploader("Upload Textbook/Notes (PDF)", type="pdf")
+    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
     
     st.header("2. Study Settings")
-    tone = st.selectbox("Teaching Style", [
-        "Professor", 
-        "Munnabhai (Hinglish)", 
-        "Physicswallah UGC-NET Coach", 
-        "Simple"
-    ])
-    
-    st.info("✨ **Pinterest Stickers**: Vibrant & Colorful.")
+    tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Physicswallah UGC-NET Coach", "Simple"])
     page_range = st.slider("Select Page Range", 1, 2500, (1, 100))
     start_pg, end_pg = page_range
 
 # --- PROCESSING ---
 if api_key and uploaded_file:
     try:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key, temperature=0.7)
+        # Initialize the direct Google API
+        genai.configure(api_key=api_key)
+        # Using the standard SDK for generation too
+        chat_llm = genai.GenerativeModel('gemini-1.5-flash')
 
         @st.cache_resource(show_spinner=False)
         def get_vector_db(file_content, _start, _end, _key):
-            # Use our new Batch-Enabled fix
-            embeddings = QuotaSafeEmbeddings(_key)
-            
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(file_content)
                 tmp_path = tmp.name
@@ -102,64 +76,56 @@ if api_key and uploaded_file:
             all_docs = loader.load()
             docs = all_docs[_start-1 : min(_end, len(all_docs))]
             
-            # Increase chunk size slightly to reduce total number of chunks (saves quota)
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=150)
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = splitter.split_documents(docs)
             
+            # Use our custom class that bypasses LangChain's broken bits
+            embeddings = PureGoogleEmbeddings(_key)
             db = FAISS.from_documents(chunks, embeddings)
             os.remove(tmp_path)
             return db
 
-        with st.spinner(f"🚀 Indexing section (Batch Mode active to save Quota)..."):
+        with st.spinner("🚀 Indexing with Official Google API (No LangChain bug)..."):
             vector_db = get_vector_db(uploaded_file.getvalue(), start_pg, end_pg, api_key)
-            st.sidebar.success(f"✅ Ready! Using {QuotaSafeEmbeddings(api_key).model_name}")
+            st.sidebar.success("✅ Book Ready!")
 
         # --- CHAT ---
-        query = st.chat_input("Ask a question from the book...")
-        
+        query = st.chat_input("Ask a question...")
         if query:
             with st.chat_message("user"): st.write(query)
 
+            # Retrieval
             context_docs = vector_db.similarity_search(query, k=5)
             context_text = "\n\n".join([d.page_content for d in context_docs])
 
-            styles = {
-                "Professor": "Academic Tutor. Professional yet aesthetic.",
-                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, 'Mammu', and funny life analogies.",
-                "Physicswallah UGC-NET Coach": "High-energy coach. 'Hello Baccho!', 'Ekdum basic se samjhenge', 'Selection rukna nahi chahiye!'. Use Hinglish.",
-                "Simple": "Explain like I'm 10 with bright, colorful examples."
+            personalities = {
+                "Professor": "Academic Tutor. Professional but uses bright aesthetic headers.",
+                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call user 'Mammu', use funny analogies.",
+                "Physicswallah UGC-NET Coach": "High-energy coach. 'Hello Baccho!', 'Selection rukna nahi chahiye!'. Use Hinglish.",
+                "Simple": "Explain like I'm 10 with colorful simple examples."
             }
 
-            prompt = ChatPromptTemplate.from_template("""
-            You are Socrates, a pedagogical tutor. 
+            system_prompt = f"""
+            You are Socrates. Answer the Question using the Context.
             
-            GROUNDING:
-            - If found in Context: Answer and MUST end with "[SOURCE: TEXTBOOK]"
-            - If not: Answer and MUST start with "[SOURCE: GENERAL AI KNOWLEDGE]"
-
-            PINTEREST STICKER RULES (STRICT):
-            - NEVER use black dots, gray circles, or dashes (-, *, •).
-            - START EVERY POINT with a unique, BRIGHT, COLORFUL Pinterest emoji.
-            - USE THESE: 🌈, 🍭, 🎀, ✨, 🎨, 🌟, 🍬, 🦋, 🦄, 🎈, 🧁, 🌸, 🎡, 🍓, 🍦, 🍭, 🎡, 🍄.
-            - SUB-POINTS: Use "╰┈➤ 💖" and a different colorful emoji.
-            - The final output must look like a VIBRANT digital scrapbook.
+            1. If in Context: End with "[SOURCE: TEXTBOOK]"
+            2. If not: Start with "[SOURCE: GENERAL AI KNOWLEDGE]"
             
-            Context: {context}
-            Style/Personality: {personality}
-            Question: {question}
+            AESTHETIC RULES:
+            - NEVER use black dots or dashes (-, *, •).
+            - START EVERY POINT with a colorful Pinterest emoji (🌈, 🍭, 🎀, ✨, 🎨, 🌟, 🍬, 🦋, 🦄, 🎈, 🧁, 🌸).
+            - Use "╰┈➤ 💖" for sub-points.
             
-            Answer:""")
-
-            chain = prompt | llm | StrOutputParser()
+            Personality: {personalities[tone]}
+            Context: {context_text}
+            """
 
             with st.chat_message("assistant"):
-                response = chain.invoke({"personality": styles[tone], "context": context_text, "question": query})
-                st.markdown(response)
+                # Talk directly to the model
+                response = chat_llm.generate_content(f"{system_prompt}\n\nQuestion: {query}")
+                st.markdown(response.text)
 
     except Exception as e:
-        if "429" in str(e):
-            st.error("Too many requests! Google is cooling down. Please wait 1 minute and try again.")
-        else:
-            st.error(f"System Error: {e}")
+        st.error(f"Error: {e}")
 else:
-    st.warning("Please enter your API Key and upload a PDF.")
+    st.warning("Enter API Key and upload PDF.")
