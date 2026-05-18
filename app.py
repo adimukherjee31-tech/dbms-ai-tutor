@@ -21,7 +21,8 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload Textbook/Notes (PDF)", type="pdf")
     
     st.header("2. Study Settings")
-    tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Simple"])
+    # Added "Physicswallah UGC-NET Coach" to the options below
+    tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Physicswallah UGC-NET Coach", "Simple"])
     page_limit = st.slider("Pages to index", 10, 500, 200)
 
 # --- AUTO-DETECT MODELS ---
@@ -80,9 +81,11 @@ if api_key and uploaded_file:
             context_docs = vector_db.similarity_search(query, k=4)
             context_text = "\n\n".join([d.page_content for d in context_docs])
 
+            # Added the new style description to the dictionary below
             styles = {
                 "Professor": "Professional Academic Tutor. Use bullet points and exam-style headings.",
                 "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call user 'Mammu', use funny life analogies.",
+                "Physicswallah UGC-NET Coach": "High-energy, motivational coaching style. Use 'Hello Baccho!', 'Ekdum basic se samjhenge', and 'Selection rukna nahi chahiye'. Use Hinglish, focus on key points for UGC-NET exams, and be very encouraging.",
                 "Simple": "Explain like I'm 10 years old with simple examples."
             }
 
