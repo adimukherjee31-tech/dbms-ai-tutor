@@ -11,7 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Socrates AI Tutor", layout="wide")
+st.set_page_config(page_title="Socrates AI Tutor", layout="wide", page_icon="🎓")
 st.title("🎓 Socrates: Pedagogical AI Tutor")
 
 # --- SIDEBAR ---
@@ -21,8 +21,20 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload Textbook/Notes (PDF)", type="pdf")
     
     st.header("2. Study Settings")
-    tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Physicswallah UGC-NET Coach", "Simple"])
-    page_limit = st.slider("Pages to index", 10, 500, 200)
+    tone = st.selectbox("Teaching Style", [
+        "Professor", 
+        "Munnabhai (Hinglish)", 
+        "Physicswallah UGC-NET Coach", 
+        "Simple"
+    ])
+    
+    # Updated to a Range Slider for custom start/end pages
+    st.info("💡 Large books (2000+ pages) work best if you select a specific range (e.g., 100 pages at a time).")
+    page_range = st.slider(
+        "Select Page Range to Index", 
+        1, 2500, (1, 200) # Default range: 1 to 200
+    )
+    start_page, end_page = page_range
 
 # --- AUTO-DETECT MODELS ---
 def get_working_model(api_key):
@@ -36,7 +48,7 @@ def get_working_model(api_key):
                 return preferred
         return clean_models[0] if clean_models else None
     except Exception:
-        return "gemini-1.5-flash" # Fallback
+        return "gemini-1.5-flash" 
 
 # --- PROCESSING ---
 if api_key and uploaded_file:
@@ -50,14 +62,17 @@ if api_key and uploaded_file:
             temperature=0.3
         )
 
+        # Added start and end page to the cache signature
         @st.cache_resource(show_spinner=False)
-        def get_vector_db(file, limit):
+        def get_vector_db(file, start_pg, end_pg):
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(file.read())
                 tmp_path = tmp.name
             
             loader = PyMuPDFLoader(tmp_path)
-            docs = loader.load()[:limit]
+            # Slicing the document: pages are 0-indexed in Python list, 
+            # so page 1 is index 0.
+            docs = loader.load()[start_pg-1 : end_pg]
             
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = splitter.split_documents(docs)
@@ -67,11 +82,12 @@ if api_key and uploaded_file:
             os.remove(tmp_path)
             return db
 
-        with st.spinner("Analyzing your materials..."):
-            vector_db = get_vector_db(uploaded_file, page_limit)
+        with st.spinner(f"Reading pages {start_page} to {end_page}..."):
+            vector_db = get_vector_db(uploaded_file, start_page, end_page)
+            st.sidebar.caption(f"✅ Indexed {end_page - start_page + 1} pages.")
 
         # --- CHAT ---
-        query = st.chat_input("Ask a question from the book...")
+        query = st.chat_input("Ask a question from this section...")
         
         if query:
             with st.chat_message("user"):
@@ -83,11 +99,10 @@ if api_key and uploaded_file:
             styles = {
                 "Professor": "Professional Academic Tutor. Use bullet points and exam-style headings.",
                 "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call user 'Mammu', use funny life analogies.",
-                "Physicswallah UGC-NET Coach": "High-energy, motivational coaching style. Use 'Hello Baccho!', 'Ekdum basic se samjhenge', and 'Selection rukna nahi chahiye'. Use Hinglish and focus on key exam points.",
+                "Physicswallah UGC-NET Coach": "High-energy, motivational coaching style. Use 'Hello Baccho!', 'Ekdum basic se samjhenge', and 'Selection rukna nahi chahiye'. Focus on JRF/NET exam points.",
                 "Simple": "Explain like I'm 10 years old with simple examples."
             }
 
-            # GROUNDED PROMPT LOGIC
             prompt = ChatPromptTemplate.from_template("""
             You are Socrates, a pedagogical tutor. Use the provided Context to answer the Question.
             
@@ -95,7 +110,7 @@ if api_key and uploaded_file:
             1. Search the 'Context' for the answer first. 
             2. If the answer is found in the Context, explain it and MUST append: "[SOURCE: TEXTBOOK]" at the end.
             3. If the answer is NOT found in the Context, answer using your general knowledge but you MUST start the response with: "[SOURCE: GENERAL AI KNOWLEDGE - NOT IN PDF]".
-            4. STICKERS: For every point or list item, DO NOT use plain black dots. Instead, use bright, colorful Pinterest-style stickers/emojis (like ✨, 🌈, 💡, 🎨, 🚀, 🌸, 🍭, 🎀, 🌟) to make the notes look aesthetic and vibrant.
+            4. STICKERS: For every point, heading, or list item, use bright, colorful Pinterest-style emojis (like ✨, 🌈, 💡, 🎨, 🚀, 🌸, 🍭, 🎀, 🌟, 🧚‍♀️, 🧸). Do not use standard black bullet points.
             
             Context: {context}
             Style/Personality: {personality}
